@@ -97,7 +97,11 @@ All 13 unit and integration tests (`test_guardrails.py`, `test_loop.py`, `test_s
 
 ### 2. Run the Offline RSI Demo (No API Keys Needed)
 ```bash
+# Example 1 (default): Text-to-JSON Record Parser
 python3 run_rsi.py --run-id demo-run
+
+# Example 2: 2D Delivery Route Optimizer (nearest-neighbor -> 2-opt)
+python3 run_rsi.py --task route_optimizer --run-id route-demo-run
 ```
 Expected progression:
 - **Baseline (`v0-baseline`)**: `score=0.3233`, `acc=0.3333`

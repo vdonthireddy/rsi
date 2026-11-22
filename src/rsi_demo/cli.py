@@ -7,10 +7,9 @@ from pathlib import Path
 import sys
 from typing import Sequence
 
-from rsi_demo.evaluator import evaluate_sandboxed
 from rsi_demo.guardrails import HARD_MAX_CYCLES, GuardrailViolation, SandboxPaths
 from rsi_demo.loop import RunSummary, run_rsi_loop
-from rsi_demo.proposer import MockProposer, OpenAICompatibleProposer, Proposer
+from rsi_demo.tasks import TASKS, build_proposer, get_task_spec
 
 
 def _default_project_root() -> Path:
@@ -45,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rsi-demo",
         description="Run a safe, sandboxed Recursive Self-Improvement (RSI) loop.",
+    )
+    parser.add_argument(
+        "--task",
+        choices=tuple(sorted(TASKS)),
+        default="text_parser",
+        help="Target task to optimize: 'text_parser' (default) or 'route_optimizer'.",
     )
     parser.add_argument(
         "--cycles",
@@ -90,20 +95,27 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    paths = SandboxPaths.from_project_root(args.project_root)
+    task_spec = get_task_spec(args.task)
+    paths = SandboxPaths.from_project_root(
+        args.project_root,
+        solver_rel_path=task_spec.solver_rel_path,
+        baseline_rel_path=task_spec.baseline_rel_path,
+        evaluator_rel_path=task_spec.evaluator_rel_path,
+        unit_test_rel_path=task_spec.unit_test_rel_path,
+    )
 
     if args.reset_only:
         baseline_source = paths.baseline_path.read_text(encoding="utf-8")
         paths.ensure_mutable_target(paths.solver_path).write_text(
             baseline_source, encoding="utf-8"
         )
-        print("Reset src/rsi_demo/solver.py to v0-baseline.")
+        print(f"Reset {task_spec.solver_rel_path} to baseline.")
         return 0
 
     if args.eval_only:
-        report = evaluate_sandboxed(paths.project_root)
+        report = task_spec.evaluate_fn(paths.project_root, 10.0)
         print(
-            f"Solver: {report.solver_version} | score={report.composite_score:.4f} | "
+            f"Task: {task_spec.name} | Solver: {report.solver_version} | score={report.composite_score:.4f} | "
             f"accuracy={report.accuracy:.4f} | cases={report.cases_passed}/{report.total_cases} | "
             f"unit_tests={report.unit_tests_passed}/{report.unit_tests_total} | "
             f"avg_latency={report.avg_latency_ms:.3f}ms"
@@ -115,11 +127,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     try:
-        proposer: Proposer
-        if args.backend == "llm":
-            proposer = OpenAICompatibleProposer()
-        else:
-            proposer = MockProposer(include_regression_demo=True)
+        proposer = build_proposer(args.task, args.backend)
 
         summary = run_rsi_loop(
             project_root=paths.project_root,
@@ -127,6 +135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             proposer=proposer,
             run_id=args.run_id,
             reset_to_baseline=not args.no_reset,
+            task=args.task,
         )
         print(_format_summary(summary))
         return 0

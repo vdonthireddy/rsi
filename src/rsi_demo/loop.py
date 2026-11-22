@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from rsi_demo.evaluator import EvaluationReport, evaluate_sandboxed
+from rsi_demo.evaluator import EvaluationReport
 from rsi_demo.guardrails import (
     HARD_MAX_CYCLES,
     GuardrailViolation,
@@ -18,7 +18,8 @@ from rsi_demo.guardrails import (
     validate_candidate_ast,
     validate_max_cycles,
 )
-from rsi_demo.proposer import MockProposer, Proposer
+from rsi_demo.proposer import Proposer
+from rsi_demo.tasks import get_task_spec
 
 
 @dataclass(frozen=True)
@@ -81,12 +82,22 @@ def run_rsi_loop(
     run_id: str = "run-offline-default",
     reset_to_baseline: bool = True,
     eval_timeout_seconds: float = 10.0,
+    task: str = "text_parser",
 ) -> RunSummary:
     """Execute a bounded, integrity-checked RSI loop inside `project_root`."""
     validated_cycles = validate_max_cycles(max_cycles)
-    paths = SandboxPaths.from_project_root(project_root)
+    task_spec = get_task_spec(task)
+    paths = SandboxPaths.from_project_root(
+        project_root,
+        solver_rel_path=task_spec.solver_rel_path,
+        baseline_rel_path=task_spec.baseline_rel_path,
+        evaluator_rel_path=task_spec.evaluator_rel_path,
+        unit_test_rel_path=task_spec.unit_test_rel_path,
+    )
     manifest = LockedFileManifest(paths.locked_files())
-    active_proposer: Proposer = proposer if proposer is not None else MockProposer()
+    active_proposer: Proposer = (
+        proposer if proposer is not None else task_spec.mock_proposer_factory()
+    )
 
     run_dir = paths.ensure_mutable_target(paths.runs_dir / run_id)
     versions_dir = paths.ensure_mutable_target(run_dir / "versions")
@@ -103,9 +114,9 @@ def run_rsi_loop(
         )
 
     best_source = paths.solver_path.read_text(encoding="utf-8")
-    validate_candidate_ast(best_source)
-    best_report: EvaluationReport = evaluate_sandboxed(
-        paths.project_root, timeout_seconds=eval_timeout_seconds
+    validate_candidate_ast(best_source, entrypoint=task_spec.entrypoint)
+    best_report: EvaluationReport = task_spec.evaluate_fn(
+        paths.project_root, eval_timeout_seconds
     )
     manifest.verify()
 
@@ -130,7 +141,7 @@ def run_rsi_loop(
         ast_passed = True
         ast_error: str | None = None
         try:
-            validate_candidate_ast(proposal.candidate_source)
+            validate_candidate_ast(proposal.candidate_source, entrypoint=task_spec.entrypoint)
         except GuardrailViolation as exc:
             ast_passed = False
             ast_error = str(exc)
@@ -174,8 +185,8 @@ def run_rsi_loop(
         candidate_report: EvaluationReport | None = None
         eval_error: str | None = None
         try:
-            candidate_report = evaluate_sandboxed(
-                paths.project_root, timeout_seconds=eval_timeout_seconds
+            candidate_report = task_spec.evaluate_fn(
+                paths.project_root, eval_timeout_seconds
             )
         except Exception as exc:  # noqa: BLE001
             eval_error = f"{type(exc).__name__}: {exc}"

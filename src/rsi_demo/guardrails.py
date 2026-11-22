@@ -82,11 +82,19 @@ class SandboxPaths:
     baseline_path: Path
     evaluator_path: Path
     guardrails_path: Path
+    unit_test_path: Path
     tests_dir: Path
     runs_dir: Path
 
     @classmethod
-    def from_project_root(cls, root: Path | str) -> "SandboxPaths":
+    def from_project_root(
+        cls,
+        root: Path | str,
+        solver_rel_path: str = "src/rsi_demo/solver.py",
+        baseline_rel_path: str = "src/rsi_demo/baseline_solver.py",
+        evaluator_rel_path: str = "src/rsi_demo/evaluator.py",
+        unit_test_rel_path: str = "tests/test_solver.py",
+    ) -> "SandboxPaths":
         project_root = Path(root).resolve()
         src_dir = (project_root / "src" / "rsi_demo").resolve()
         tests_dir = (project_root / "tests").resolve()
@@ -95,10 +103,11 @@ class SandboxPaths:
         paths = cls(
             project_root=project_root,
             src_dir=src_dir,
-            solver_path=(src_dir / "solver.py").resolve(),
-            baseline_path=(src_dir / "baseline_solver.py").resolve(),
-            evaluator_path=(src_dir / "evaluator.py").resolve(),
+            solver_path=(project_root / solver_rel_path).resolve(),
+            baseline_path=(project_root / baseline_rel_path).resolve(),
+            evaluator_path=(project_root / evaluator_rel_path).resolve(),
             guardrails_path=(src_dir / "guardrails.py").resolve(),
+            unit_test_path=(project_root / unit_test_rel_path).resolve(),
             tests_dir=tests_dir,
             runs_dir=runs_dir,
         )
@@ -108,6 +117,7 @@ class SandboxPaths:
             paths.baseline_path,
             paths.evaluator_path,
             paths.guardrails_path,
+            paths.unit_test_path,
             paths.tests_dir,
             paths.runs_dir,
         ):
@@ -139,11 +149,20 @@ class SandboxPaths:
             self.baseline_path,
             self.evaluator_path,
             self.guardrails_path,
+            self.unit_test_path,
             self.tests_dir / "test_solver.py",
+            self.tests_dir / "test_route_solver.py",
             self.tests_dir / "test_guardrails.py",
             self.tests_dir / "test_loop.py",
         ]
-        return tuple(p.resolve() for p in candidates if p.exists())
+        seen: set[Path] = set()
+        locked: list[Path] = []
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if resolved.exists() and resolved not in seen:
+                seen.add(resolved)
+                locked.append(resolved)
+        return tuple(locked)
 
 
 def sha256_file(path: Path) -> str:
@@ -186,7 +205,7 @@ def validate_max_cycles(max_cycles: int) -> int:
     return max_cycles
 
 
-def validate_candidate_ast(source: str) -> None:
+def validate_candidate_ast(source: str, entrypoint: str = "extract_record") -> None:
     """Statically inspect candidate solver Python code before writing or running it."""
     if not isinstance(source, str) or not source.strip():
         raise GuardrailViolation("Candidate solver source must be a non-empty string")
@@ -196,7 +215,7 @@ def validate_candidate_ast(source: str) -> None:
     except SyntaxError as exc:
         raise GuardrailViolation(f"Candidate solver has syntax error: {exc}") from exc
 
-    has_extract_record = False
+    has_entrypoint = False
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -223,16 +242,16 @@ def validate_candidate_ast(source: str) -> None:
                 raise GuardrailViolation(
                     f"Forbidden attribute access in candidate solver: '{node.attr}'"
                 )
-        elif isinstance(node, ast.FunctionDef) and node.name == "extract_record":
-            has_extract_record = True
+        elif isinstance(node, ast.FunctionDef) and node.name == entrypoint:
+            has_entrypoint = True
             if len(node.args.posonlyargs) + len(node.args.args) < 1:
                 raise GuardrailViolation(
-                    "extract_record must accept at least one positional argument (text)"
+                    f"{entrypoint} must accept at least one positional argument"
                 )
 
-    if not has_extract_record:
+    if not has_entrypoint:
         raise GuardrailViolation(
-            "Candidate solver must define top-level `def extract_record(text: str) -> dict`"
+            f"Candidate solver must define top-level `def {entrypoint}(...)`"
         )
 
 
