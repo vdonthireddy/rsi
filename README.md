@@ -7,7 +7,7 @@ A small, self-contained, sandboxed Python project demonstrating **Recursive Self
 
 ---
 
-## Included Examples (Two Tasks, One Generic RSI Engine)
+## Included Examples (Three Tasks, One Generic RSI Engine)
 
 The project separates the **generic RSI engine** (`loop.py`, `guardrails.py`, `cli.py`) from the **task-specific target code & evaluator** via `TaskSpec` in `src/rsi_demo/tasks.py`:
 
@@ -17,6 +17,9 @@ The project separates the **generic RSI engine** (`loop.py`, `guardrails.py`, `c
 2. **`route_optimizer` (`--task route_optimizer`)** — *2D delivery tour optimization* (`plan_route(stops) -> list[str]` in `src/rsi_demo/route_solver.py`):
    Orders delivery stops into a closed loop starting at `stops[0]` to minimize total Euclidean distance.
    - Improves from `v0-input-order` (`score=0.5186`, `0/6` optimal) through nearest-neighbor (`0.9127`) to 2-opt edge uncrossing (`1.0000`, `6/6` optimal), while catching and rolling back an X-coordinate sort that violates the depot-start contract.
+3. **`task_scheduler` (`--task task_scheduler`)** — *Deadline-aware job scheduling* (`plan_schedule(jobs) -> list[str]` in `src/rsi_demo/scheduler_solver.py`):
+   Orders `(job_id, duration_hours, deadline_hour)` jobs on a single machine to minimize total lateness.
+   - Improves from `v0-input-order` (`score=0.2712`, `0/6` optimal) through Shortest Job First (`0.6521`) and Earliest Deadline First (`0.8458`) to EDF + pairwise swap optimization (`1.0000`, `6/6` optimal), while catching and rolling back a shortcut that drops long jobs.
 
 ---
 
@@ -43,12 +46,17 @@ rsi/
 │   ├── baseline_route_solver.py       # [route_optimizer] Locked v0 baseline template
 │   ├── route_solver.py                # [route_optimizer] Mutable active solver
 │   ├── route_evaluator.py             # [route_optimizer] Locked 6-case tour benchmark & runner
-│   └── route_proposer.py              # [route_optimizer] RouteMockProposer
+│   ├── route_proposer.py              # [route_optimizer] RouteMockProposer
+│   ├── baseline_scheduler_solver.py   # [task_scheduler] Locked v0 baseline template
+│   ├── scheduler_solver.py            # [task_scheduler] Mutable active solver
+│   ├── scheduler_evaluator.py         # [task_scheduler] Locked 6-case lateness benchmark & runner
+│   └── scheduler_proposer.py          # [task_scheduler] SchedulerMockProposer
 └── tests/
     ├── test_solver.py                 # [text_parser] Locked contract unit tests (6 tests)
     ├── test_route_solver.py           # [route_optimizer] Locked contract unit tests (5 tests)
+    ├── test_scheduler_solver.py       # [task_scheduler] Locked contract unit tests (4 tests)
     ├── test_guardrails.py             # Safety, AST, tamper-detection, and acceptance-gate tests
-    └── test_loop.py                   # End-to-end RSI loop tests for both tasks & AST rejection
+    └── test_loop.py                   # End-to-end RSI loop tests for all 3 tasks & AST rejection
 ```
 
 ---
@@ -105,7 +113,7 @@ rsi/
 ```bash
 python3 -m pytest -v
 ```
-All 19 unit and integration tests (`test_guardrails.py`, `test_loop.py`, `test_route_solver.py`, `test_solver.py`) should pass.
+All 24 unit and integration tests (`test_guardrails.py`, `test_loop.py`, `test_route_solver.py`, `test_scheduler_solver.py`, `test_solver.py`) should pass.
 
 ### 2. Run the Offline RSI Demo (No API Keys Needed)
 ```bash
@@ -117,6 +125,9 @@ python3 run_rsi.py --run-id demo-run
 
 # Example 2: 2D Delivery Route Optimizer (nearest-neighbor -> 2-opt)
 python3 run_rsi.py --task route_optimizer --run-id route-demo-run
+
+# Example 3: Deadline Job Scheduler (SJF -> EDF -> EDF + pairwise swap)
+python3 run_rsi.py --task task_scheduler --run-id sched-demo-run
 ```
 Expected progression (`text_parser`):
 - **Baseline (`v0-baseline`)**: `score=0.3233`, `acc=0.3333`

@@ -152,6 +152,7 @@ class SandboxPaths:
             self.unit_test_path,
             self.tests_dir / "test_solver.py",
             self.tests_dir / "test_route_solver.py",
+            self.tests_dir / "test_scheduler_solver.py",
             self.tests_dir / "test_guardrails.py",
             self.tests_dir / "test_loop.py",
         ]

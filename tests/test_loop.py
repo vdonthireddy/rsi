@@ -135,6 +135,25 @@ class TestRSILoop(unittest.TestCase):
                 ["accepted", "accepted", "rolled_back", "rolled_back", "rolled_back"],
             )
 
+    def test_task_scheduler_example_improves_and_rolls_back(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            sandbox = _copy_sandbox_project(Path(tmp))
+            summary = run_rsi_loop(
+                project_root=sandbox,
+                max_cycles=5,
+                run_id="sched-test-01",
+                task="task_scheduler",
+            )
+            self.assertEqual(summary.cycles_executed, 5)
+            self.assertEqual(summary.baseline_version, "v0-input-order")
+            self.assertEqual(summary.final_version, "v3-edf-pairwise-swap")
+            self.assertGreater(summary.final_score, summary.baseline_score)
+            self.assertEqual(summary.final_score, 1.0)
+            self.assertEqual(
+                [c.decision for c in summary.cycles],
+                ["accepted", "accepted", "rolled_back", "accepted", "rolled_back"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

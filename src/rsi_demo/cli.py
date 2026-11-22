@@ -49,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--task",
         choices=tuple(sorted(TASKS)),
         default="text_parser",
-        help="Target task to optimize: 'text_parser' (default) or 'route_optimizer'.",
+        help="Target task to optimize (default: 'text_parser').",
     )
     parser.add_argument(
         "--cycles",

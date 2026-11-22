@@ -173,6 +173,43 @@ Notice the key takeaway: **the exact same RSI engine and guardrails** (`loop.py`
 
 ---
 
+## Example 3: Scheduling Tasks Before Deadlines (`--task task_scheduler`)
+
+Here is a third, everyday example powered by the exact same RSI engine: **deciding what order to finish tasks before their deadlines** (`python3 run_rsi.py --task task_scheduler`).
+
+Imagine you have 4 chores or work tasks to do one after another starting at **Hour 0**, and each one takes some hours and has a deadline:
+
+```text
+migration  →  takes 8 hours, due by Hour 4
+sync_a     →  takes 2 hours, due by Hour 6
+sync_b     →  takes 2 hours, due by Hour 7
+sync_c     →  takes 2 hours, due by Hour 8
+```
+
+Every hour a task finishes *after* its deadline counts as **1 hour of lateness**. Here is how the scheduler improves step by step:
+
+1. **Start (`v0-input-order`):**
+   It does `migration` first (8 hours!). By the time `migration` finishes at Hour 8, **every single task** is late (`migration` is 4h late, `sync_a` at Hour 10 is 4h late, `sync_b` at Hour 12 is 5h late, `sync_c` at Hour 14 is 6h late = **19 hours total lateness**). Across all 6 test schedules, it scores **27%**.
+
+2. **Cycle 1 (`v1-shortest-job-first`) — Kept:**
+   It learns to knock out quick tasks first! Doing `sync_a`, `sync_b`, `sync_c` (2h each) finishes all three **on time** at Hours 2, 4, and 6, leaving only `migration` late (finishing at Hour 14 = 10 hours late). Overall score jumps from **27% to 65%**.
+
+3. **Cycle 2 (`v2-earliest-deadline-first`) — Kept:**
+   Next, it switches to sorting by **earliest deadline first**—which fixes medium-length urgent tasks on other schedules (like `reversed_deadlines`) and raises the overall score to **85%**.
+   *(However, on our `heavy_blocker_trap` above, `migration` has the earliest deadline at Hour 4, so pure earliest-deadline-first puts the 8-hour blocker back in front and slips back to 19 hours lateness there!)*
+
+4. **Cycle 3 (`v3-drop-long-jobs-regression`) — Caught & Undone:**
+   The system tries a sneaky shortcut: *"Just skip any task longer than 4 hours so it can't block the others!"*
+   The safety test (`tests/test_scheduler_solver.py`) immediately catches that `migration` was deleted (`3/4` tests passed) and **rolls back** to Cycle 2.
+
+5. **Cycle 4 (`v3-edf-pairwise-swap`) — Kept:**
+   Learning from that mistake, it keeps **all** tasks, starts from earliest-deadline-first, and tests swapping pairs of tasks whenever a swap reduces total lateness. It automatically moves the 8-hour `migration` behind the three 2-hour `sync` tasks, cutting total lateness from 19h down to the best possible **10h**—hitting **100%** across all 6 schedules!
+
+6. **Cycle 5 (`v4-plateau-noop`) — Rejected:**
+   Everything already hits 100%, so a no-op tweak is rejected cleanly.
+
+---
+
 ## Why Guardrails Matter (No Cheating!)
 
 Think back to the cooking contest or study routine analogy. What if a student tried to "improve their grade" by sneaking into the teacher's desk and changing the answer key? Their score would say 100%, even though they learned nothing.
