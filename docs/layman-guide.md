@@ -118,6 +118,22 @@ When you run `./restart.sh` (or `python3 run_rsi.py`), here is the exact chain o
 
 ---
 
+## Example 2: Planning a Delivery Driver's Route (`--task route_optimizer`)
+
+To show that the RSI safety engine isn't tied to just one problem, the project also includes a completely different second example: **route planning** (`python3 run_rsi.py --task route_optimizer`).
+
+Imagine a delivery driver who starts at the **depot**, needs to drop off packages at 6–8 stops, and then return to the depot—driving the shortest total distance possible:
+
+- **Start (`v0-input-order`):** The program visits stops in whatever scrambled order they were typed on the clipboard, zigzagging back and forth across town. Score: **52%**.
+- **Cycle 1 (`v1-nearest-neighbor`) — Kept:** It switches to a common-sense rule: *"Always drive to the closest unvisited stop next."* Total driving distance drops dramatically. Score jumps to **91%**.
+- **Cycle 2 (`v2-two-opt`) — Kept:** It notices its route still crosses over itself in a figure-8, so it learns to untangle crossing paths. Now all 6 delivery routes match the shortest possible distance (**100%**).
+- **Cycle 3 (`v3-x-sort-regression`) — Caught & Undone:** It tries a shortcut that simply sorts stops from west to east—forgetting the rule that the driver *must* start at the depot. The safety tests catch the mistake immediately and **roll back** to Cycle 2.
+- **Cycles 4–5:** Since the route is already 100% optimal, extra tweaks add no improvement and are rejected.
+
+Notice the key takeaway: **the exact same RSI engine and guardrails** (`loop.py` and `guardrails.py`) power both the messy-note reader and the delivery-route planner—only the problem's solver and scorecard were swapped.
+
+---
+
 ## Why Guardrails Matter (No Cheating!)
 
 Think back to the cooking contest or study routine analogy. What if a student tried to "improve their grade" by sneaking into the teacher's desk and changing the answer key? Their score would say 100%, even though they learned nothing.
