@@ -7,11 +7,16 @@ A small, self-contained, sandboxed Python project demonstrating **Recursive Self
 
 ---
 
-## What Task Does It Solve?
+## Included Examples (Two Tasks, One Generic RSI Engine)
 
-The target task is **semi-structured text-to-JSON record extraction** (`extract_record(text: str) -> dict` in `src/rsi_demo/solver.py`). Real-world logs and LLM outputs frequently mix clean JSON, Markdown code fences, trailing commas, `key=value` inline pairs, comments/banners, currency strings (`$49.50`), quoted delimiters (`"Alert: disk full, node 3"`), URLs containing colons, and inconsistent key aliases (`User_Email`, `Qty`, `Amt`).
+The project separates the **generic RSI engine** (`loop.py`, `guardrails.py`, `cli.py`) from the **task-specific target code & evaluator** via `TaskSpec` in `src/rsi_demo/tasks.py`:
 
-Starting from a minimal `v0-baseline` solver (`score=0.3233`, `5/15` or `33.3%` accuracy), the RSI loop iteratively evolves `src/rsi_demo/solver.py` up to `1.0000` (`15/15` cases) within a hard cap of **5 cycles**, while catching and rolling back a flawed regex refactor along the way.
+1. **`text_parser` (default, `--task text_parser`)** — *Semi-structured text-to-JSON extraction* (`extract_record(text: str) -> dict` in `src/rsi_demo/solver.py`):
+   Handles clean JSON, Markdown code fences, trailing commas, `key=value` pairs, comments/banners, currency (`$49.50`), quoted delimiters (`"Alert: disk full, node 3"`), URLs containing colons, and key aliases (`User_Email`, `Qty`, `Amt`).
+   - Improves from `v0-baseline` (`score=0.3233`, `33.3%` accuracy) to `1.0000` (`15/15` cases) within 5 cycles, catching and rolling back a flawed regex shortcut in Cycle 3.
+2. **`route_optimizer` (`--task route_optimizer`)** — *2D delivery tour optimization* (`plan_route(stops) -> list[str]` in `src/rsi_demo/route_solver.py`):
+   Orders delivery stops into a closed loop starting at `stops[0]` to minimize total Euclidean distance.
+   - Improves from `v0-input-order` (`score=0.5186`, `0/6` optimal) through nearest-neighbor (`0.9127`) to 2-opt edge uncrossing (`1.0000`, `6/6` optimal), while catching and rolling back an X-coordinate sort that violates the depot-start contract.
 
 ---
 
@@ -19,24 +24,31 @@ Starting from a minimal `v0-baseline` solver (`score=0.3233`, `5/15` or `33.3%` 
 
 ```text
 rsi/
-├── pyproject.toml                 # Zero third-party runtime dependencies (Python >= 3.11)
-├── run_rsi.py                     # Convenience CLI launcher
-├── README.md                      # Technical overview & step-by-step checklist
+├── pyproject.toml                     # Zero third-party runtime dependencies (Python >= 3.11)
+├── run_rsi.py                         # Convenience CLI launcher
+├── restart.sh                         # Reset solver to baseline, run pytest, and launch a fresh run
+├── README.md                          # Technical overview & step-by-step checklist
 ├── docs/
-│   ├── architecture.md            # Detailed design, scoring math, & frontier RSI comparison
-│   └── layman-guide.md            # Jargon-free explanation with everyday analogies
+│   ├── architecture.md                # Detailed design, scoring math, & frontier RSI comparison
+│   └── layman-guide.md                # Jargon-free explanation with everyday analogies & walkthrough
 ├── src/rsi_demo/
-│   ├── baseline_solver.py         # Locked v0 baseline template
-│   ├── solver.py                  # Mutable active solver improved during RSI runs
-│   ├── evaluator.py               # Locked 15-case benchmark & subprocess evaluation runner
-│   ├── guardrails.py              # Sandbox paths, SHA-256 anti-tamper, AST safety, rollback gates
-│   ├── proposer.py                # Offline MockProposer + optional OpenAI-compatible LLM hook
-│   ├── loop.py                    # Core RSI orchestrator & deterministic JSONL/JSON logging
-│   └── cli.py                     # CLI interface
+│   ├── loop.py                        # Generic RSI orchestrator & deterministic JSONL/JSON logging
+│   ├── guardrails.py                  # Sandbox paths, SHA-256 anti-tamper, AST safety, rollback gates
+│   ├── tasks.py                       # TaskSpec registry wiring tasks into the generic RSI engine
+│   ├── cli.py                         # CLI interface (--task, --cycles, --backend, --run-id, etc.)
+│   ├── baseline_solver.py             # [text_parser] Locked v0 baseline template
+│   ├── solver.py                      # [text_parser] Mutable active solver
+│   ├── evaluator.py                   # [text_parser] Locked 15-case benchmark & subprocess runner
+│   ├── proposer.py                    # [text_parser] MockProposer + OpenAI-compatible LLM hook
+│   ├── baseline_route_solver.py       # [route_optimizer] Locked v0 baseline template
+│   ├── route_solver.py                # [route_optimizer] Mutable active solver
+│   ├── route_evaluator.py             # [route_optimizer] Locked 6-case tour benchmark & runner
+│   └── route_proposer.py              # [route_optimizer] RouteMockProposer
 └── tests/
-    ├── test_solver.py             # Locked contract unit tests (must pass 100% every cycle)
-    ├── test_guardrails.py         # Safety, AST, tamper-detection, and acceptance-gate tests
-    └── test_loop.py               # End-to-end RSI loop & adversarial AST-rejection tests
+    ├── test_solver.py                 # [text_parser] Locked contract unit tests (6 tests)
+    ├── test_route_solver.py           # [route_optimizer] Locked contract unit tests (5 tests)
+    ├── test_guardrails.py             # Safety, AST, tamper-detection, and acceptance-gate tests
+    └── test_loop.py                   # End-to-end RSI loop tests for both tasks & AST rejection
 ```
 
 ---
@@ -93,23 +105,33 @@ rsi/
 ```bash
 python3 -m pytest -v
 ```
-All 13 unit and integration tests (`test_guardrails.py`, `test_loop.py`, `test_solver.py`) should pass.
+All 19 unit and integration tests (`test_guardrails.py`, `test_loop.py`, `test_route_solver.py`, `test_solver.py`) should pass.
 
 ### 2. Run the Offline RSI Demo (No API Keys Needed)
 ```bash
+# Quick reset + test + run via restart.sh:
+./restart.sh
+
 # Example 1 (default): Text-to-JSON Record Parser
 python3 run_rsi.py --run-id demo-run
 
 # Example 2: 2D Delivery Route Optimizer (nearest-neighbor -> 2-opt)
 python3 run_rsi.py --task route_optimizer --run-id route-demo-run
 ```
-Expected progression:
+Expected progression (`text_parser`):
 - **Baseline (`v0-baseline`)**: `score=0.3233`, `acc=0.3333`
 - **Cycle 1 (`v1-json-recovery`)**: `ACCEPTED` -> `score=0.5233` (`7/15` cases)
 - **Cycle 2 (`v2-kv-coercion`)**: `ACCEPTED` -> `score=0.9044` (`13/15` cases)
 - **Cycle 3 (`v3-naive-regex-regression`)**: `ROLLED_BACK` -> `score=0.8540`, `unit=5/6` (caught URL colon truncation!)
 - **Cycle 4 (`v3-quote-aware-aliasing`)**: `ACCEPTED` -> `score=1.0000` (`15/15` cases)
 - **Cycle 5 (`v4-plateau-noop`)**: `ROLLED_BACK` -> `score=1.0000` (no strict gain at plateau)
+
+Expected progression (`route_optimizer`):
+- **Baseline (`v0-input-order`)**: `score=0.5186`, `acc=0.6101` (`0/6` optimal)
+- **Cycle 1 (`v1-nearest-neighbor`)**: `ACCEPTED` -> `score=0.9127` (`3/6` optimal)
+- **Cycle 2 (`v2-two-opt`)**: `ACCEPTED` -> `score=1.0000` (`6/6` optimal)
+- **Cycle 3 (`v3-x-sort-regression`)**: `ROLLED_BACK` -> `score=0.5841`, `unit=4/5` (caught depot-start invariant violation!)
+- **Cycle 4–5**: `ROLLED_BACK` -> `score=1.0000` (already optimal; no strict improvement)
 
 ### 3. Inspect Logs and Version Snapshots
 ```bash
@@ -133,6 +155,7 @@ python3 run_rsi.py --backend llm --cycles 3 --run-id llm-run
 Every LLM-generated candidate goes through the exact same AST safety check, subprocess isolation, SHA-256 tamper check, unit tests, and rollback gate.
 
 ### 5. Extend the Project Safely
-1. **Add harder benchmark cases**: Edit `BENCHMARK_CASES` in `src/rsi_demo/evaluator.py` (for example, nested lists or European decimal formats) and add matching invariants to `tests/test_solver.py`.
-2. **Add a custom proposer**: Implement the `Proposer` protocol in `src/rsi_demo/proposer.py` (`propose(cycle, current_source, report, history) -> Proposal`).
-3. **Never bypass `guardrails.py`**: Keep `HARD_MAX_CYCLES`, AST checks, and `LockedFileManifest` intact—treat `tests/` and `evaluator.py` as immutable ground truth during any improvement run.
+1. **Add a new RSI task**: Register a new `TaskSpec` in `src/rsi_demo/tasks.py` pointing to your baseline/active solver, locked evaluator, unit test file, and proposer—`loop.py`, `guardrails.py`, and `cli.py` work without modification.
+2. **Add harder benchmark cases**: Edit `BENCHMARK_CASES` in `src/rsi_demo/evaluator.py` or `ROUTE_BENCHMARK_CASES` in `src/rsi_demo/route_evaluator.py`, and add matching invariants to `tests/test_solver.py` or `tests/test_route_solver.py`.
+3. **Add a custom proposer**: Implement the `Proposer` protocol in `src/rsi_demo/proposer.py` (`propose(cycle, current_source, report, history) -> Proposal`).
+4. **Never bypass `guardrails.py`**: Keep `HARD_MAX_CYCLES`, AST checks, and `LockedFileManifest` intact—treat `tests/` and evaluators as immutable ground truth during any improvement run.
