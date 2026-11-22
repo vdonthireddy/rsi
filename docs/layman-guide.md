@@ -122,13 +122,52 @@ When you run `./restart.sh` (or `python3 run_rsi.py`), here is the exact chain o
 
 To show that the RSI safety engine isn't tied to just one problem, the project also includes a completely different second example: **route planning** (`python3 run_rsi.py --task route_optimizer`).
 
-Imagine a delivery driver who starts at the **depot**, needs to drop off packages at 6–8 stops, and then return to the depot—driving the shortest total distance possible:
+Imagine a delivery driver who starts at the **depot**, needs to drop off packages at several stops, and then return to the depot—driving the shortest total distance possible.
 
-- **Start (`v0-input-order`):** The program visits stops in whatever scrambled order they were typed on the clipboard, zigzagging back and forth across town. Score: **52%**.
-- **Cycle 1 (`v1-nearest-neighbor`) — Kept:** It switches to a common-sense rule: *"Always drive to the closest unvisited stop next."* Total driving distance drops dramatically. Score jumps to **91%**.
-- **Cycle 2 (`v2-two-opt`) — Kept:** It notices its route still crosses over itself in a figure-8, so it learns to untangle crossing paths. Now all 6 delivery routes match the shortest possible distance (**100%**).
-- **Cycle 3 (`v3-x-sort-regression`) — Caught & Undone:** It tries a shortcut that simply sorts stops from west to east—forgetting the rule that the driver *must* start at the depot. The safety tests catch the mistake immediately and **roll back** to Cycle 2.
-- **Cycles 4–5:** Since the route is already 100% optimal, extra tweaks add no improvement and are rejected.
+### A Concrete Route Example (`scrambled_square`)
+
+Suppose the driver has four stops on a 10×10 block city grid, given in a scrambled order:
+
+```text
+depot at (0, 0)    →  Start here
+s1    at (10, 10)  →  Top-right corner
+s2    at (0, 10)   →  Top-left corner
+s3    at (10, 0)   →  Bottom-right corner
+```
+
+The shortest possible loop simply walks around the outer edge of the square (`depot → s2 → s1 → s3 → depot`), which is **40.0 blocks** total.
+
+Here is how the solver evolves across the 5 cycles:
+
+1. **Start (`v0-input-order`):**
+   The baseline program visits stops in the exact scrambled order they were typed:
+   ```text
+   depot (0,0) → s1 (10,10) → s2 (0,10) → s3 (10,0) → depot (0,0)
+   ```
+   Because it cuts diagonally across the middle *twice* in an "X" shape, the driver travels **48.3 blocks** instead of 40.0. Across all 6 test maps, it scores **52%**.
+
+2. **Cycle 1 (`v1-nearest-neighbor`) — Kept:**
+   The program switches to a common-sense rule: *"From wherever you are, drive to the closest unvisited stop next."*
+   On our square, from `depot (0,0)` it picks `s2 (0,10)` (10 blocks away) instead of diagonal `s1 (10,10)` (14.1 blocks away), tracing the clean outer loop:
+   ```text
+   depot → s2 → s1 → s3 → depot   (40.0 blocks!)
+   ```
+   Across all 6 maps, the overall score jumps from **52% to 91%**.
+
+3. **Cycle 2 (`v2-two-opt`) — Kept:**
+   On larger 6–8 stop maps (like `figure_eight_crossing`), nearest-neighbor can still paint itself into a corner with one crossing path. Cycle 2 adds a rule that checks if any two trip segments cross like an "X" and untangles them. Now all 6 delivery maps hit the shortest possible distance (**100%**).
+
+4. **Cycle 3 (`v3-x-sort-regression`) — Caught & Undone:**
+   Next, it tries a shortcut: *"Just sort all stops from west to east!"*
+   Look what happens on a map where the depot is on the east side:
+   ```text
+   Stops: depot (10, 0), west (-5, 0), north (2, 5)
+   Shortcut output: ["west", "north", "depot"]
+   ```
+   The driver started at `"west"` instead of `"depot"`! The safety test (`tests/test_route_solver.py`) immediately catches the broken rule (`4/5` passed) and **rolls back** to Cycle 2.
+
+5. **Cycles 4–5:**
+   Since Cycle 2 already achieves **100%** across all 6 maps, further tweaks add no improvement and are rejected cleanly.
 
 Notice the key takeaway: **the exact same RSI engine and guardrails** (`loop.py` and `guardrails.py`) power both the messy-note reader and the delivery-route planner—only the problem's solver and scorecard were swapped.
 
