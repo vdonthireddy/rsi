@@ -37,6 +37,87 @@ Every single attempt—both successes and mistakes—is written down in a perman
 
 ---
 
+## A Concrete Example: Following One Messy Note End-to-End
+
+To see what the code is actually doing, imagine a support system receives a messy text message like this:
+
+```text
+title: "Alert: disk full, node 3", severity: "high", retries: 2
+```
+
+What we **want** the program to produce is a clean, structured dictionary where numbers are real numbers (not text) and the quoted message stays intact:
+
+```json
+{
+  "title": "Alert: disk full, node 3",
+  "severity": "high",
+  "retries": 2
+}
+```
+
+Here is how the program's output evolves across the self-improvement loop:
+
+1. **Start (`v0-baseline`):**
+   The starting code only knows how to split on the *first* colon (`:`) on each line. So it treats everything after `title:` as one giant chunk:
+   ```json
+   {
+     "title": "\"Alert: disk full, node 3\", severity: \"high\", retries: 2"
+   }
+   ```
+   It missed `severity` and `retries` completely.
+
+2. **Cycle 2 (`v2-kv-coercion`) — Better, but still flawed on quotes:**
+   The program learns to split comma-separated items and convert numbers like `2`. However, it splits on *every* comma—even the comma inside `"Alert: disk full, node 3"`:
+   ```json
+   {
+     "title": "\"Alert: disk full",
+     "severity": "high",
+     "retries": 2
+   }
+   ```
+   `severity` and `retries` are now right, and overall score jumps from 52% to 90%, so this version is **kept**—even though `title` is still broken.
+
+3. **Cycle 3 (`v3-naive-regex-regression`) — The shortcut that gets caught:**
+   Next, the system tries a compact pattern-matching shortcut. While testing, it runs the locked safety check on a website link:
+   ```text
+   endpoint: https://api.example.com:8443/v1
+   ```
+   The shortcut accidentally stops at the second colon and chops the link down to `"https"`. The safety test (`tests/test_solver.py`) immediately fails (`5/6` passed), so the system **rejects this change and rolls back** to Cycle 2.
+
+4. **Cycle 4 (`v3-quote-aware-aliasing`) — The clean fix:**
+   Learning from Cycle 3's failure, the system writes a quote-aware reader that ignores commas and colons inside `"..."` quotes, keeps website links whole, and standardizes nicknames (like turning `Qty: 7` and `Amt: $49.50` into `quantity: 7` and `amount: 49.5`). Now our messy note produces the exact target output:
+   ```json
+   {
+     "title": "Alert: disk full, node 3",
+     "severity": "high",
+     "retries": 2
+   }
+   ```
+   All 15 benchmark cases and all 6 safety tests pass (**100%**).
+
+---
+
+## How the Pieces Work Together (Start to Finish)
+
+When you run `./restart.sh` (or `python3 run_rsi.py`), here is the exact chain of events behind the scenes:
+
+1. **Reset to a clean starting line (`baseline_solver.py` -> `solver.py`):**
+   The launcher resets the active program (`src/rsi_demo/solver.py`) back to the simple `v0-baseline` copy so every run starts fairly.
+2. **Seal the rules (`guardrails.py`):**
+   The guardrail system takes digital fingerprints (SHA-256 hashes) of the test files and scoring rules. It also enforces a hard limit of **5 cycles** and restricts edits strictly to `solver.py`.
+3. **Grade the current version (`evaluator.py`):**
+   The evaluator runs `solver.py` in a separate, timed mini-process against 15 locked test cases and 6 core safety tests (`tests/test_solver.py`). It produces a scorecard and a list of what failed.
+4. **Propose a fix (`proposer.py`):**
+   The proposer reads the failure list (for example, *"failed on quoted commas"*) and writes a new candidate version of `solver.py`.
+5. **Safety-check, test, and decide (`guardrails.py` + `loop.py`):**
+   - First, an automatic code scanner inspects the candidate's structure (AST) to make sure it doesn't use forbidden commands (like reading files or running system commands).
+   - Next, the evaluator tests the candidate and re-checks the SHA-256 fingerprints to confirm nothing cheated.
+   - If all safety tests pass **and** the score strictly improves, the new version is **kept**. Otherwise, `solver.py` is **rolled back** to the previous best version.
+6. **Save the logbook (`runs/demo-run/`):**
+   Every cycle's score, decision, and code snapshot is saved in `runs/demo-run/cycles.jsonl`, `summary.json`, and `versions/` so you can inspect the whole story afterward.
+
+---
+
 ## Why Guardrails Matter (No Cheating!)
 
 Think back to the cooking contest or study routine analogy. What if a student tried to "improve their grade" by sneaking into the teacher's desk and changing the answer key? Their score would say 100%, even though they learned nothing.
